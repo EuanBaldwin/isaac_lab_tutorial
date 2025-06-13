@@ -82,12 +82,21 @@ class IsaacLabTutorialEnv(DirectRLEnv):
         self.robot.set_joint_velocity_target(self.actions, joint_ids=self.dof_idx)
 
     def _get_observations(self) -> dict:
-        self.velocity = self.robot.data.root_com_lin_vel_b 
-        observations = {"policy": self.velocity}
+        self.velocity = self.robot.data.root_com_vel_w
+        self.forwards = math_utils.quat_apply(self.robot.data.root_link_quat_w, self.robot.data.FORWARD_VEC_B)
+
+        dot = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
+        cross = torch.cross(self.forwards, self.commands, dim=-1)[:,-1].reshape(-1,1)
+        forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
+        obs = torch.hstack((dot, cross, forward_speed))
+
+        observations = {"policy": obs}
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        total_reward = torch.linalg.norm(self.velocity, dim=-1, keepdim=True)
+        forward_reward = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
+        alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
+        total_reward = forward_reward*torch.exp(alignment_reward)
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
